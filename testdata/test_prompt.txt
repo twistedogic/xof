@@ -1,0 +1,38 @@
+Given the following files and their content:
+
+# testdata/test.json
+```json
+[{a:"test"}, {b:1}]
+```
+
+# util_test.go:
+```go
+package util
+
+import (
+  "testing"
+  "os"
+  "io"
+  "encoding/json"
+)
+
+func Test_MyStruct(t *testing.T) {
+  b, err := os.ReadFile("testdata/test.json")
+  if err != nil {
+    t.Fatal(err)
+  }
+  var s []MyStruct 
+  if err := json.Unmarshal(b, &s); err != nil {
+    t.Fatal(err)
+  }
+  got, err := json.Marshal(&s)
+  if err != nil {
+    t.Fatal(err)
+  }
+  if !bytes.Equal(got, b) {
+    t.Fail()
+  }
+}
+```
+
+Define `MyStruct` in a seperate file call `my_struct_is_awesome.go` for the test to pass.

@@ -1,0 +1,7 @@
+output: output.gen.go
+prompt: implement a go struct that can marshal and unmarshal the json in `testdata/test.json`
+model: "llama3.2"
+context:
+- testdata/*.json
+- output_test.go
+script: go test ./...
