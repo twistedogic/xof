@@ -275,7 +275,6 @@ func (c Config) code(ctx context.Context, prompt string) (CodeBlock, error) {
 		return code, err
 	}
 	if err := c.execute(ctx); err != nil {
-		defer os.Remove(c.Output)
 		return code, err
 	}
 	return code, nil
