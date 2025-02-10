@@ -56,13 +56,13 @@ type ScriptResult struct {
 func (s ScriptResult) String() string {
 	msg := make([]string, 0, 6)
 	if s.Error != nil {
-		msg = append(msg, fmt.Sprintf("Error:\n%v", s.Error))
+		msg = append(msg, fmt.Sprintf("Error:\n```\n%v\n```", s.Error))
 	}
 	if s.Stdout != "" {
-		msg = append(msg, fmt.Sprintf("Stdout:\n%s", s.Stdout))
+		msg = append(msg, fmt.Sprintf("Stdout:\n```\n%s```", s.Stdout))
 	}
 	if s.Stderr != "" {
-		msg = append(msg, fmt.Sprintf("Stderr:\n%s", s.Stderr))
+		msg = append(msg, fmt.Sprintf("Stderr:\n```\n%s```", s.Stderr))
 	}
 	return strings.Join(msg, "\n\n")
 }
@@ -107,19 +107,24 @@ func execute(ctx context.Context, script string) (result ScriptResult) {
 			result.Error = fmt.Errorf("process exits with %d", cmd.ProcessState.ExitCode())
 		}
 	}
-	return
-}
-
-func (c Config) execute(ctx context.Context) error {
-	result := execute(ctx, c.Script)
 	if err := result.Err(); err != nil {
 		fmt.Println("=== FAILED with output ===")
 		fmt.Println(result.Stderr)
-		return err
+	} else {
+		fmt.Println("=== PASSED with output ===")
+		fmt.Println(result.Stdout)
 	}
-	fmt.Println("=== PASSED with output ===")
-	fmt.Println(result.Stdout)
-	return nil
+	return result
+}
+
+func (c Config) execute(ctx context.Context, code CodeBlock) (ScriptResult, error) {
+	if err := code.WriteTo(c.Output); err != nil {
+		return ScriptResult{}, err
+	}
+	if c.Script == "" {
+		return ScriptResult{}, nil
+	}
+	return execute(ctx, c.Script), nil
 }
 
 func langFromFile(filename string) string {
@@ -219,15 +224,6 @@ func (c Config) prompt() (string, error) {
 	return strings.Join(messages, "\n\n"), nil
 }
 
-func (c Config) promptWithError(code CodeBlock, err error) (string, error) {
-	addon := fmt.Sprintf("However, with the following generated code for the above: \n%s\n\nIt failed with:\n%v\nFix the generated code and return fixed code ONLY.", code, err)
-	prompt, err := c.prompt()
-	if err != nil {
-		return "", err
-	}
-	return prompt + "\n\n" + addon, nil
-}
-
 func (c Config) model() string {
 	if c.Model != "" {
 		return c.Model
@@ -253,6 +249,20 @@ func generate(ctx context.Context, model, prompt string) (response string, err e
 	return
 }
 
+func (c Config) review(ctx context.Context, code CodeBlock, result ScriptResult) (string, error) {
+	system := "You are a senior software engineer. Review the following code and error. Provide actionable suggestions:"
+	return generate(ctx, c.model(), system+"\n\n"+code.String()+"\n\n"+result.String())
+}
+
+func (c Config) refactor(ctx context.Context, code CodeBlock, result ScriptResult) (CodeBlock, error) {
+	comments, err := c.review(ctx, code, result)
+	if err != nil {
+		return code, err
+	}
+	prompt := comments + "\n\n" + "With the comments above, refactor the following code and return the refactored code ONLY." + "\n\n" + code.String()
+	return c.code(ctx, prompt)
+}
+
 func (c Config) code(ctx context.Context, prompt string) (CodeBlock, error) {
 	res, err := generate(ctx, c.model(), prompt)
 	if err != nil {
@@ -271,12 +281,6 @@ func (c Config) code(ctx context.Context, prompt string) (CodeBlock, error) {
 	}
 	fmt.Println("=== generated code ===")
 	fmt.Println(code)
-	if err := code.WriteTo(c.Output); err != nil {
-		return code, err
-	}
-	if err := c.execute(ctx); err != nil {
-		return code, err
-	}
 	return code, nil
 }
 
@@ -285,15 +289,21 @@ func (c Config) Generate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	code, err := c.code(ctx, prompt)
+	if err != nil {
+		return err
+	}
 	for attempt := 0; attempt < c.Attempt; attempt++ {
-		code, err := c.code(ctx, prompt)
-		if err == nil {
+		result, err := c.execute(ctx, code)
+		if err != nil {
+			return err
+		}
+		if result.Err() == nil {
 			return nil
 		}
-		var promptErr error
-		prompt, promptErr = c.promptWithError(code, err)
-		if promptErr != nil {
-			return promptErr
+		code, err = c.refactor(ctx, code, result)
+		if err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("attempted %d time(s) and failed", c.Attempt)

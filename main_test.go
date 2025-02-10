@@ -46,7 +46,7 @@ func Test_execute(t *testing.T) {
 				Stdout: "stdout\n",
 				Stderr: "stderr\n",
 			},
-			err: fmt.Errorf("Stdout:\nstdout\n\n\nStderr:\nstderr\n"),
+			err: fmt.Errorf("Stdout:\n```\nstdout\n```\n\nStderr:\n```\nstderr\n```"),
 		},
 	}
 	for name := range cases {
@@ -97,6 +97,7 @@ func Test_Generate(t *testing.T) {
 	output := filepath.Join(dir, "main.go")
 	c := Config{
 		Output:  output,
+		Model:   "llama3",
 		Prompt:  "Write a golang program that prints 'hello' to stdout.",
 		Script:  "go run " + output,
 		Attempt: 10,
