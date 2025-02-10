@@ -37,14 +37,17 @@ type Config struct {
 	Script  string   `yaml:"script"`
 	Attempt int      `yaml:"attempt"`
 	Context []string `yaml:"context"`
+
+	dir string
 }
 
-func LoadConfig(r io.Reader) (c Config, err error) {
-	b, err := io.ReadAll(r)
+func LoadConfig(f *os.File) (c Config, err error) {
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return
 	}
 	err = yaml.Unmarshal(b, &c)
+	c.dir = filepath.Dir(f.Name())
 	return
 }
 
@@ -118,7 +121,7 @@ func execute(ctx context.Context, script string) (result ScriptResult) {
 }
 
 func (c Config) execute(ctx context.Context, code CodeBlock) (ScriptResult, error) {
-	if err := code.WriteTo(c.Output); err != nil {
+	if err := code.WriteTo(c.output()); err != nil {
 		return ScriptResult{}, err
 	}
 	if c.Script == "" {
@@ -204,8 +207,18 @@ func fileContext(files []string) (string, error) {
 	return msg, nil
 }
 
+func (c Config) output() string { return filepath.Join(c.dir, c.Output) }
+
 func (c Config) contexts() (string, error) {
-	return fileContext(c.Context)
+	files := make([]string, 0, len(c.Context))
+	for _, pattern := range c.Context {
+		matches, err := filepath.Glob(filepath.Join(c.dir, pattern))
+		if err != nil {
+			return "", err
+		}
+		files = append(files, matches...)
+	}
+	return fileContext(files)
 }
 
 func (c Config) prompt() (string, error) {
@@ -270,14 +283,14 @@ func (c Config) code(ctx context.Context, prompt string) (CodeBlock, error) {
 	}
 	generatedCode := extractCodeBlocks(res)
 	var code CodeBlock
-	lang := langFromFile(c.Output)
+	lang := langFromFile(c.output())
 	for _, block := range generatedCode {
 		if string(block.lang) == lang {
 			code = block
 		}
 	}
 	if len(code.content) == 0 {
-		return CodeBlock{}, fmt.Errorf("no code is generated.")
+		code = CodeBlock{lang: []byte("markdown"), content: []byte(res)}
 	}
 	fmt.Println("=== generated code ===")
 	fmt.Println(code)
@@ -309,9 +322,27 @@ func (c Config) Generate(ctx context.Context) error {
 	return fmt.Errorf("attempted %d time(s) and failed", c.Attempt)
 }
 
+func lookupConfig() (*os.File, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	for dir != "/" {
+		file := filepath.Join(dir, defaultConfigName)
+		if _, err := os.Stat(file); err == nil {
+			return os.Open(file)
+		}
+		dir = filepath.Dir(strings.TrimSuffix(dir, "/"))
+	}
+	return nil, fmt.Errorf("no %s found", defaultConfigName)
+}
+
 func main() {
-	// TODO: implement recursive lookup of the config file in current and parent folders
-	f, err := os.Open(defaultConfigName)
+	f, err := lookupConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
