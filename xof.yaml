@@ -1,0 +1,6 @@
+output: config.go
+prompt: Implement a golang struct `MyConfig` for unmarshaling the above yaml.
+script: 'go test -v ./...'
+attempt: 10
+context:
+- testdata/test.yaml
